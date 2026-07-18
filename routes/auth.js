@@ -18,7 +18,15 @@ router.post("/login", async (req, res) => {
     req.session.userId = user._id.toString();
     req.session.role = user.role;
 
-    res.json({ id: user._id, name: user.name, employeeId: user.employeeId, role: user.role });
+    // Explicitly save session before responding — critical in serverless environments
+    // where express-session's automatic save-on-response-end can be unreliable
+    req.session.save((err) => {
+      if (err) {
+        console.error("Session save error:", err);
+        return res.status(500).json({ error: "Failed to create session" });
+      }
+      res.json({ id: user._id, name: user.name, employeeId: user.employeeId, role: user.role });
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

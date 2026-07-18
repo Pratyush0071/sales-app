@@ -18,7 +18,7 @@ let cached = global._mongooseConn;
 if (!cached) {
   cached = global._mongooseConn = { conn: null, promise: null };
 }
-
+app.set("trust proxy", 1);
 async function connectDB() {
   if (cached.conn) return cached.conn;
 
@@ -66,15 +66,18 @@ app.use(async (req, res, next) => {
 // Session (note: connect-mongo will also open its own connection — see note below)
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({ mongoUrl: MONGO_URI }),
+    proxy: true,
+    store: MongoStore.create({
+      mongoUrl: MONGO_URI,
+    }),
     cookie: {
       httpOnly: true,
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-      secure: process.env.NODE_ENV === "production", // required for cross-site cookies on HTTPS
+      secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 1000 * 60 * 60 * 24 * 7,
     },
   })
 );
@@ -102,3 +105,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 module.exports = app;
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Rejection:", err);
+});

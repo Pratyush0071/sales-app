@@ -11,16 +11,39 @@ const formConfigRoutes = require("./routes/formConfig");
 const entryRoutes = require("./routes/entries");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/sales_app";
 
-// Connect to MongoDB
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+// ---- Cached DB connection (critical for serverless) ----
+let cached = global._mongooseConn;
+if (!cached) {
+  cached = global._mongooseConn = { conn: null, promise: null };
+}
 
-// Middleware
+async function connectDB() {
+  if (cached.conn) return cached.conn;
+
+  if (!cached.promise) {
+    cached.promise = mongoose
+      .connect(MONGO_URI, {
+        serverSelectionTimeoutMS: 5000, // fail fast instead of hanging 30s
+        maxPoolSize: 5,                  // keep small — serverless spins up many instances
+        family: 4,                       // avoid IPv6/SRV resolution issues on some hosts
+      })
+      .then((m) => {
+        console.log("✅ MongoDB connected");
+        return m;
+      })
+      .catch((err) => {
+        cached.promise = null; // allow retry on next request instead of caching a failure forever
+        throw err;
+      });
+  }
+
+  cached.conn = await cached.promise;
+  return cached.conn;
+}
+
+// ---- Middleware ----
 app.use(express.json());
 app.use(
   cors({
@@ -29,7 +52,18 @@ app.use(
   })
 );
 
-// Session
+// Ensure DB is connected before any route handles a request
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("❌ MongoDB connection error:", err.message);
+    res.status(503).json({ error: "Database unavailable, try again shortly" });
+  }
+});
+
+// Session (note: connect-mongo will also open its own connection — see note below)
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
@@ -39,11 +73,13 @@ app.use(
     cookie: {
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      secure: process.env.NODE_ENV === "production", // required for cross-site cookies on HTTPS
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
   })
 );
 
-// Routes
+// ---- Routes ----
 app.use("/api/auth", authRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/form-config", formConfigRoutes);
@@ -53,27 +89,16 @@ app.use("/api/entries", entryRoutes);
 app.get("/api", (req, res) => {
   res.json({
     status: "ok",
-    mongodb: mongoose.connection.readyState,
+    mongodb: mongoose.connection.readyState, // 1 = connected
   });
 });
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
-mongoose.connection.on("connected", () => {
-  console.log("✅ MongoDB connected");
-});
 
-mongoose.connection.on("error", (err) => {
-  console.error("❌ MongoDB error:", err);
-});
-
-mongoose.connection.on("disconnected", () => {
-  console.log("❌ MongoDB disconnected");
-});
-app.get("/api", (req, res) => {
-  res.json({
-    status: "ok",
-    mongodb: mongoose.connection.readyState,
-    hasMongoUri: !!process.env.MONGO_URI,
+// ---- Export for Vercel (no app.listen in production) ----
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
-});
+}
+
+module.exports = app;

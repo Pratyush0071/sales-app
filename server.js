@@ -50,8 +50,12 @@ app.use("/api/form-config", formConfigRoutes);
 app.use("/api/entries", entryRoutes);
 
 // Health check
-app.get("/api", (req, res) => res.json({ status: "ok" }));
-
+app.get("/api", (req, res) => {
+  res.json({
+    status: "ok",
+    mongodb: mongoose.connection.readyState,
+  });
+});
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

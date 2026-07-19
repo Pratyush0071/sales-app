@@ -45,9 +45,25 @@ async function connectDB() {
 
 // ---- Middleware ----
 app.use(express.json());
+
+const allowedOrigins = [
+  "https://salestrackapp.vercel.app",
+  "https://localhost",
+  "http://localhost:5173",
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: function (origin, callback) {
+      // Allow requests with no Origin header (e.g., Postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
@@ -108,4 +124,9 @@ module.exports = app;
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled Rejection:", err);
+});
+
+app.use((req, res, next) => {
+  console.log("Origin:", req.headers.origin);
+  next();
 });
